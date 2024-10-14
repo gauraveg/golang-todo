@@ -79,28 +79,36 @@ func login(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Error while parsing payload. Error: %v", err)
 		return
 	}
-	sqlQuery := `select userid from users.users where email=$1 and password=$2`
+
+	sqlQuery := `select userid, password from users.users where email=$1`
 	userid := ""
-	err = conn.QueryRow(sqlQuery, payload.Email, payload.Password).Scan(&userid)
+	userPwdhash := ""
+	err = conn.QueryRow(sqlQuery, payload.Email).Scan(&userid, &userPwdhash)
 	if err != nil {
 		responseWithJson(w, http.StatusBadRequest, err)
 		log.Printf("Error while inserting record. Error: %v", err)
 		return
 	}
 
-	sqlQueryINS := `insert into users.session values ($1, $2);`
-	sessionId := uuid.New()
-	_, err = conn.Exec(sqlQueryINS, sessionId, userid)
-	if err != nil {
-		responseWithJson(w, http.StatusBadRequest, err)
-		log.Printf("Error while inserting record. Error: %v", err)
-		return
+	if verifyPwdHash(payload.Password, userPwdhash) {
+		sqlQueryINS := `insert into users.session values ($1, $2);`
+		sessionId := uuid.New()
+		_, err = conn.Exec(sqlQueryINS, sessionId, userid)
+		if err != nil {
+			responseWithJson(w, http.StatusBadRequest, err)
+			log.Printf("Error while inserting record. Error: %v", err)
+			return
+		}
+		responseWithJson(w, http.StatusCreated, sessionToken{
+			Status: "Login success",
+			Token:  sessionId.String(),
+		})
+	} else {
+		responseWithJson(w, http.StatusCreated, map[string]string{
+			"Status":  "Login Failed.",
+			"Message": "Wrong password",
+		})
 	}
-
-	responseWithJson(w, http.StatusCreated, sessionToken{
-		Status: "Login success",
-		Token:  sessionId.String(),
-	})
 }
 
 // status handler

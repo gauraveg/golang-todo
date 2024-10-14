@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type userModel struct {
@@ -88,10 +88,13 @@ func addUser(w http.ResponseWriter, conn *sql.DB, r *http.Request) {
 		return
 	}
 
+	//Password hashing
+	hashedPwd := passwordhashing(payload.Password)
+
 	sqlQuery := `insert into users.users values ($1, $2, $3, $4, $5, $6) returning userid`
 	id := ""
 	generateUserId := uuid.New()
-	err = conn.QueryRow(sqlQuery, generateUserId, payload.Name, payload.Email, payload.Password, time.Now(), time.Now()).Scan(&id)
+	err = conn.QueryRow(sqlQuery, generateUserId, payload.Name, payload.Email, hashedPwd, time.Now(), time.Now()).Scan(&id)
 	if err != nil {
 		responseWithJson(w, http.StatusBadRequest, err)
 		log.Printf("Error while inserting record. Error: %v", err)
@@ -121,4 +124,18 @@ func addUser(w http.ResponseWriter, conn *sql.DB, r *http.Request) {
 	}
 
 	responseWithJson(w, http.StatusCreated, user)
+}
+
+func passwordhashing(pwd string) string {
+	hash, err := bcrypt.GenerateFromPassword([]byte(pwd), bcrypt.MinCost)
+	if err != nil {
+		log.Println(err)
+	}
+
+	return string(hash)
+}
+
+func verifyPwdHash(pwd string, userPwdhash string) bool {
+	err := bcrypt.CompareHashAndPassword([]byte(userPwdhash), []byte(pwd))
+	return err == nil
 }
