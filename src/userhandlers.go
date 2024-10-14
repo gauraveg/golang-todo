@@ -90,12 +90,35 @@ func addUser(w http.ResponseWriter, conn *sql.DB, r *http.Request) {
 
 	sqlQuery := `insert into users.users values ($1, $2, $3, $4, $5, $6) returning userid`
 	id := ""
-	err = conn.QueryRow(sqlQuery, uuid.New(), payload.Name, payload.Email, payload.Password, time.Now(), time.Now()).Scan(&id)
+	generateUserId := uuid.New()
+	err = conn.QueryRow(sqlQuery, generateUserId, payload.Name, payload.Email, payload.Password, time.Now(), time.Now()).Scan(&id)
 	if err != nil {
 		responseWithJson(w, http.StatusBadRequest, err)
 		log.Printf("Error while inserting record. Error: %v", err)
 		return
 	}
 
-	responseWithJson(w, http.StatusCreated, payload)
+	//fetch the newly added record to send the response
+	sqlQuery = `select * from users.users where userid=$1`
+	data, err := conn.Query(sqlQuery, generateUserId)
+	if err != nil {
+		responseWithJson(w, http.StatusBadRequest, err)
+		log.Printf("Cant fetch data. Error: %v", err)
+		return
+	}
+	defer data.Close()
+	//users := make([]userModel, 0)
+	user := userModel{}
+	for data.Next() {
+		//user := userModel{}
+		err := data.Scan(&user.Userid, &user.Name, &user.Email, &user.Password, &user.CreatedAt, &user.UpdatedAt)
+		if err != nil {
+			log.Println(err)
+			responseWithJson(w, http.StatusBadRequest, err)
+			return
+		}
+		//users = append(users, user)
+	}
+
+	responseWithJson(w, http.StatusCreated, user)
 }

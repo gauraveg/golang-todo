@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
@@ -15,12 +16,12 @@ type taskModel struct {
 	CreatedAt   string    `json:"createdAt"`
 	UpdatedAt   string    `json:"updatedAt"`
 	ValidTill   *string   `json:"validTill"`
-	Userid      string    `json:"userId"`
+	Userid      uuid.UUID `json:"userId"`
 }
 
 func fetchTasks(w http.ResponseWriter, conn *sql.DB, r *http.Request) {
 	//userid := "b2a0b669-ebf4-433f-8f59-898a79f61d4e"
-	userid := r.Context().Value(userContextKey).(string)
+	userid := r.Context().Value(userContext).(string)
 	data, err := conn.Query("SELECT * FROM users.tasks WHERE userid=$1 and validtill is null", userid)
 	if err != nil {
 		responseWithJson(w, http.StatusBadRequest, err)
@@ -51,6 +52,7 @@ func fetchTasks(w http.ResponseWriter, conn *sql.DB, r *http.Request) {
 }
 
 func addTasks(w http.ResponseWriter, conn *sql.DB, r *http.Request) {
+	//userid := r.Context().Value(userContextKey).(string)
 	var payload taskModel
 	err := parsePayload(r.Body, &payload)
 	if err != nil {
@@ -61,18 +63,39 @@ func addTasks(w http.ResponseWriter, conn *sql.DB, r *http.Request) {
 
 	sqlQuery := `insert into users.tasks values ($1, $2, $3, $4, $5, $6) returning taskid`
 	id := ""
-	err = conn.QueryRow(sqlQuery, uuid.New(), payload.Description, time.Now(), time.Now(), nil, payload.Userid).Scan(&id)
+	generateTaskId := uuid.New()
+	err = conn.QueryRow(sqlQuery, generateTaskId, payload.Description, time.Now(), time.Now(), nil, payload.Userid).Scan(&id)
 	if err != nil {
 		responseWithJson(w, http.StatusBadRequest, err)
 		log.Printf("Error while inserting record. Error: %v", err)
 		return
 	}
 
-	responseWithJson(w, http.StatusCreated, payload)
+	//fetch the newly added record to send the response
+	sqlQuery = `select * from users.tasks where taskid=$1`
+	data, err := conn.Query(sqlQuery, generateTaskId)
+	if err != nil {
+		responseWithJson(w, http.StatusBadRequest, err)
+		log.Printf("Cant fetch data. Error: %v", err)
+		return
+	}
+	defer data.Close()
+
+	task := taskModel{}
+	for data.Next() {
+		err := data.Scan(&task.Taskid, &task.Description, &task.CreatedAt, &task.UpdatedAt, &task.ValidTill, &task.Userid)
+		if err != nil {
+			log.Println(err)
+			responseWithJson(w, http.StatusBadRequest, err)
+			return
+		}
+	}
+
+	responseWithJson(w, http.StatusCreated, task)
 }
 
 func updateTasksWithId(w http.ResponseWriter, conn *sql.DB, r *http.Request) {
-	userid := r.Context().Value(userContextKey).(string)
+	userid := r.Context().Value(userContext).(string)
 	var payload taskModel
 	err := parsePayload(r.Body, &payload)
 	if err != nil {
@@ -89,11 +112,31 @@ func updateTasksWithId(w http.ResponseWriter, conn *sql.DB, r *http.Request) {
 		return
 	}
 
-	responseWithJson(w, http.StatusCreated, payload)
+	//fetch the newly update record to send the response
+	sqlQuery = `select * from users.tasks where userid=$1 and taskid=$2`
+	data, err := conn.Query(sqlQuery, userid, payload.Taskid)
+	if err != nil {
+		responseWithJson(w, http.StatusBadRequest, err)
+		log.Printf("Cant fetch data. Error: %v", err)
+		return
+	}
+	defer data.Close()
+
+	task := taskModel{}
+	for data.Next() {
+		err := data.Scan(&task.Taskid, &task.Description, &task.CreatedAt, &task.UpdatedAt, &task.ValidTill, &task.Userid)
+		if err != nil {
+			log.Println(err)
+			responseWithJson(w, http.StatusBadRequest, err)
+			return
+		}
+	}
+
+	responseWithJson(w, http.StatusCreated, task)
 }
 
 func deleteTasksWithId(w http.ResponseWriter, conn *sql.DB, r *http.Request) {
-	userid := r.Context().Value(userContextKey).(string)
+	userid := r.Context().Value(userContext).(string)
 	var payload taskModel
 	err := parsePayload(r.Body, &payload)
 	if err != nil {
@@ -115,8 +158,9 @@ func deleteTasksWithId(w http.ResponseWriter, conn *sql.DB, r *http.Request) {
 }
 
 func getTasksWithId(w http.ResponseWriter, conn *sql.DB, r *http.Request) {
-	userid := r.Context().Value(userContextKey).(string)
-	data, err := conn.Query("SELECT * FROM users.tasks WHERE userid=$1", userid)
+	taskidFromURL := chi.URLParam(r, "id")
+	//userid := r.Context().Value(userContextKey).(string)
+	data, err := conn.Query("SELECT * FROM users.tasks WHERE taskid=$1 and validtill is null", taskidFromURL)
 	if err != nil {
 		responseWithJson(w, http.StatusBadRequest, err)
 		log.Printf("Cant fetch data. Error: %v", err)
@@ -124,17 +168,22 @@ func getTasksWithId(w http.ResponseWriter, conn *sql.DB, r *http.Request) {
 	}
 	defer data.Close()
 
-	tasks := make([]taskModel, 0)
+	//tasks := make([]taskModel, 0)
+	task := taskModel{}
 	for data.Next() {
-		task := taskModel{}
 		err = data.Scan(&task.Taskid, &task.Description, &task.CreatedAt, &task.UpdatedAt, &task.ValidTill, &task.Userid)
 		if err != nil {
 			log.Println(err)
 			responseWithJson(w, http.StatusBadRequest, err)
 			return
 		}
-		tasks = append(tasks, task)
+		//tasks = append(tasks, task)
 	}
-
-	responseWithJson(w, http.StatusOK, tasks)
+	if task.Description != "" {
+		responseWithJson(w, http.StatusOK, task)
+	} else {
+		responseWithJson(w, http.StatusOK, map[string]string{
+			"body": "No records found",
+		})
+	}
 }

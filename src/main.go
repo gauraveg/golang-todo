@@ -17,7 +17,7 @@ import (
 
 var conn *sql.DB
 
-const userContextKey string = "userContext"
+const userContext string = "userContext"
 
 type loginResponse struct {
 	Email    string `json:"email"`
@@ -41,11 +41,10 @@ func AuthMiddleware(next http.Handler) http.Handler {
 		userId, err := getUserIdForToken(sessionToken)
 		if err != nil {
 			responseWithJson(w, http.StatusUnauthorized, err)
-			log.Printf("Error while parsing payload. Error: %v", err)
+			log.Printf("Cannot fetch userId from the session token. Error: %v", err)
 			return
 		}
-
-		r = r.WithContext(context.WithValue(r.Context(), userContextKey, userId))
+		r = r.WithContext(context.WithValue(r.Context(), userContext, userId))
 		next.ServeHTTP(w, r)
 	})
 }
@@ -66,7 +65,6 @@ func logout(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Error while updating record. Error: %v", err)
 		return
 	}
-
 	responseWithJson(w, http.StatusCreated, map[string]string{
 		"status": "Logout success",
 	})
@@ -81,7 +79,6 @@ func login(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Error while parsing payload. Error: %v", err)
 		return
 	}
-
 	sqlQuery := `select userid from users.users where email=$1 and password=$2`
 	userid := ""
 	err = conn.QueryRow(sqlQuery, payload.Email, payload.Password).Scan(&userid)
@@ -191,7 +188,7 @@ func main() {
 		taskRouter.Post("/add", handlerPOSTTask)
 		taskRouter.Route("/{id}", func(taskIdRouter chi.Router) {
 			taskIdRouter.Get("/", handlerGETTaskWithId)
-			taskIdRouter.Put("/update", handlerPUTTaskWithId)
+			taskIdRouter.Put("/", handlerPUTTaskWithId)
 			taskIdRouter.Delete("/", handlerDELTaskWithId)
 		})
 	})
